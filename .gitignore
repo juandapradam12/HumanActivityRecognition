@@ -14,3 +14,7 @@ venv/
 *.png
 !docs/assets/*.png
 .Rhistory
+artifacts/models/
+data/uci_har/
+/tmp/
+*.joblib
