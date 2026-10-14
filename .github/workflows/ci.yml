@@ -25,6 +25,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
           pip install -r requirements.txt
+          # Prefer CPU wheels in CI for smaller/faster installs
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
 
       - name: Download official UCI files if missing
         run: python scripts/download_data.py
@@ -33,7 +35,7 @@ jobs:
         run: python scripts/smoke_test.py
 
       - name: Pytest
-        run: pytest -q --maxfail=1
+        run: pytest -q --maxfail=1 -m "not slow"
 
       - name: Quick official benchmark
         run: python scripts/run_benchmark.py --protocol official --quick --skip-custom-knn

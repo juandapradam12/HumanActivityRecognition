@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download the official UCI HAR train/test partitions and subject IDs."""
+"""Download the official UCI HAR partitions (features, subjects, optional raw IMU)."""
 
 from __future__ import annotations
 
@@ -27,6 +27,18 @@ FILES = {
     "activity_labels.txt": "UCI HAR Dataset/activity_labels.txt",
 }
 
+RAW_CHANNELS = (
+    "body_acc_x",
+    "body_acc_y",
+    "body_acc_z",
+    "body_gyro_x",
+    "body_gyro_y",
+    "body_gyro_z",
+    "total_acc_x",
+    "total_acc_y",
+    "total_acc_z",
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -34,7 +46,12 @@ def parse_args() -> argparse.Namespace:
         "--dest",
         type=Path,
         default=Path(__file__).resolve().parents[1],
-        help="Directory to write data files into (default: repo root)",
+        help="Directory for tabular UCI files (default: repo root)",
+    )
+    parser.add_argument(
+        "--with-raw",
+        action="store_true",
+        help="Also extract raw Inertial Signals into data/inertial_signals/",
     )
     parser.add_argument(
         "--force",
@@ -71,40 +88,75 @@ def extract_inner_dataset(zip_path: Path, tmp: Path) -> zipfile.ZipFile:
     return outer
 
 
+def _extract_member(archive: zipfile.ZipFile, member: str, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with archive.open(member) as src, open(target, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+
+
+def raw_targets(repo_root: Path) -> list[tuple[str, Path]]:
+    """Return (archive_member, dest_path) pairs for raw IMU files."""
+    out = repo_root / "data" / "inertial_signals"
+    pairs = []
+    for split in ("train", "test"):
+        for channel in RAW_CHANNELS:
+            member = (
+                f"UCI HAR Dataset/{split}/Inertial Signals/{channel}_{split}.txt"
+            )
+            pairs.append((member, out / f"{channel}_{split}.txt"))
+    return pairs
+
+
 def main() -> int:
     args = parse_args()
     dest: Path = args.dest
     dest.mkdir(parents=True, exist_ok=True)
 
-    missing = [
-        name
-        for name in FILES
-        if args.force or not (dest / name).exists()
+    missing_tabular = [
+        name for name in FILES if args.force or not (dest / name).exists()
     ]
-    if not missing:
-        print(f"All data files already present in {dest}")
+    missing_raw: list[tuple[str, Path]] = []
+    if args.with_raw:
+        missing_raw = [
+            (member, path)
+            for member, path in raw_targets(dest)
+            if args.force or not path.exists()
+        ]
+
+    if not missing_tabular and not missing_raw:
+        print(f"All requested data files already present under {dest}")
         return 0
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
         zip_path = download_zip(tmp)
         archive = extract_inner_dataset(zip_path, tmp)
-        name_index = {Path(n).name: n for n in archive.namelist() if not Path(n).name.startswith("._")}
+        name_index = {
+            Path(n).name: n
+            for n in archive.namelist()
+            if not Path(n).name.startswith("._")
+        }
 
-        for filename in missing:
-            # Prefer the canonical relative path; fall back to basename match.
+        for filename in missing_tabular:
             member = FILES[filename]
             if member not in archive.namelist():
                 member = name_index.get(filename)
             if member is None:
                 print(f"WARNING: {filename} not found in archive", file=sys.stderr)
                 continue
-            target = dest / filename
             print(f"Extracting {filename}")
-            with archive.open(member) as src, open(target, "wb") as dst:
-                shutil.copyfileobj(src, dst)
+            _extract_member(archive, member, dest / filename)
 
-    print(f"Done. Data files are in {dest}")
+        for member, path in missing_raw:
+            if member not in archive.namelist():
+                print(f"WARNING: {member} not found", file=sys.stderr)
+                continue
+            print(f"Extracting raw {path.name}")
+            _extract_member(archive, member, path)
+
+    print(f"Done. Tabular data → {dest}")
+    if args.with_raw:
+        print(f"Raw IMU signals → {dest / 'data' / 'inertial_signals'}")
     return 0
 
 
