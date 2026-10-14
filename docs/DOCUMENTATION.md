@@ -1,6 +1,6 @@
 # Documentation — Human Activity Recognition
 
-This document describes the dataset, the algorithms used in this repository, how evaluation is performed, and where accuracy still leaves room to grow.
+This document describes the dataset, algorithms, evaluation protocols, packaging, and remaining opportunities.
 
 ---
 
@@ -15,9 +15,7 @@ Given a fixed-length window of smartphone inertial measurements, predict one of 
 5. Standing  
 6. Laying  
 
-Inputs are **not** raw time series. The UCI authors already transform each 2.56-second window into a **561-dimensional feature vector** of time- and frequency-domain statistics (means, standard deviations, energy, entropy, autoregressive coefficients, signal magnitude area, angle features, etc.).
-
-That makes the task a classic multi-class classification problem on tabular features — ideal for comparing distance-based, linear, kernel, and tree methods.
+Inputs are **not** raw time series. The UCI authors transform each 2.56-second window into a **561-dimensional feature vector** of time- and frequency-domain statistics.
 
 ---
 
@@ -26,31 +24,23 @@ That makes the task a classic multi-class classification problem on tabular feat
 | Property | Value |
 |---|---|
 | Source | [UCI HAR Using Smartphones](https://archive.ics.uci.edu/ml/datasets/human+activity+recognition+using+smartphones) |
-| Volunteers | 30 adults (ages 19–48) |
+| Volunteers | 30 adults (ages 19–48) — 21 train / 9 test |
 | Device | Samsung Galaxy S II on the waist |
 | Sensors | 3-axis accelerometer + 3-axis gyroscope @ 50 Hz |
 | Window | 2.56 s, 50% overlap (128 samples) |
-| Features | 561 engineered variables (`features.txt`) |
-| Samples in this repo | 7,352 labeled training windows (`X_train.txt`, `y_train.txt`) |
+| Features | 561 engineered variables |
+| Train | 7,352 windows (`X_train.txt`, `y_train.txt`, `subject_train.txt`) |
+| Test | 2,947 windows (`X_test.txt`, `y_test.txt`, `subject_test.txt`) |
 
-Pre-processing by the dataset authors includes noise filtering and separation of body acceleration from gravity via a Butterworth low-pass filter (0.3 Hz cutoff for gravity).
+Fetch any missing files with:
 
-### Class balance (this repository)
-
-| Label | Activity | Count |
-|---:|---|---:|
-| 1 | WALKING | 1,226 |
-| 2 | WALKING_UPSTAIRS | 1,073 |
-| 3 | WALKING_DOWNSTAIRS | 986 |
-| 4 | SITTING | 1,286 |
-| 5 | STANDING | 1,374 |
-| 6 | LAYING | 1,407 |
-
-Classes are reasonably balanced; stratification is still used so hold-out folds preserve the mix.
+```bash
+python scripts/download_data.py
+```
 
 ### Feature naming caveat
 
-A few UCI feature names are duplicated. `har.data.load_feature_names` appends `_1`, `_2`, … so pandas columns stay unique without dropping information.
+A few UCI feature names are duplicated. `har.data.load_feature_names` appends `_1`, `_2`, … so pandas columns stay unique.
 
 ---
 
@@ -58,142 +48,102 @@ A few UCI feature names are duplicated. `har.data.load_feature_names` appends `_
 
 ### 3.1 From-scratch k-Nearest Neighbors
 
-Implemented in `src/har/knn.py` as `CustomKNN`.
-
-**Idea.** For a query vector \(x\):
-
-1. Compute Euclidean distance to every training sample.  
-2. Take the \(k\) nearest neighbors (default \(k=5\)).  
-3. Predict the majority label.  
-4. On a vote tie, prefer the label of the **closest** neighbor (first among sorted neighbors) — the same convention used in the original notebook.
-
-**Performance trick.** Pairwise squared distances are built with one matrix multiply:
-
-\[
-\|a - b\|^2 = \|a\|^2 + \|b\|^2 - 2\,a^\top b
-\]
-
-Neighbor indices use `np.argpartition` so we never fully sort the distance matrix.
-
-**Validation.** On the HAR hold-out slice, predictions match `sklearn.neighbors.KNeighborsClassifier(n_neighbors=5)` with Euclidean distance (zero disagreements on the tested samples).
+`CustomKNN` in `src/har/knn.py` — Euclidean distance, majority vote, nearest-neighbor tie-break, vectorized with `||a-b||^2 = ||a||^2 + ||b||^2 - 2a·b`. Matches `sklearn.neighbors.KNeighborsClassifier(n_neighbors=5)`.
 
 ### 3.2 Classical model zoo
 
-`har.models.build_model_zoo()` builds:
+`build_model_zoo()` includes KNN variants, logistic regression, linear/RBF SVM, PCA+SVM, Random Forest, Extra Trees, Hist Gradient Boosting, and calibrated logistic regression.
 
-| Model | Notes |
+### 3.3 Sitting / standing specialist & cascade
+
+Most residual errors are **sitting ↔ standing**. `build_sitting_standing_specialist()` trains a calibrated RBF SVM on labels `{4,5}` only.
+
+`CascadedHARClassifier`:
+
+1. Predict with a multiclass base (default: Hist Gradient Boosting).  
+2. When the base predicts sitting or standing, override with the specialist.
+
+On the official test set the cascade reaches the **lowest sit↔stand error (5.7%)** among compared models, at a small cost versus plain logistic regression’s top overall accuracy.
+
+### 3.4 Feature importance
+
+Extra Trees consistently ranks gravity / orientation channels highest (`tGravityAcc-*`, `angle(*,gravityMean)`), matching the physics of posture.
+
+---
+
+## 4. Evaluation protocols
+
+Implemented in `src/har/evaluate.py` and exposed via `scripts/run_benchmark.py --protocol …`.
+
+| Protocol | Command | What it measures |
+|---|---|---|
+| `holdout` | random 70/30 of train windows | Optimistic (subject leakage) |
+| `official` | UCI train → UCI test | Generalization to held-out people |
+| `loso` | leave-one-subject-out on 21 train volunteers | Subject-independent CV |
+
+### Reported headline numbers
+
+- Official test best: **Logistic Regression 95.55%**
+- LOSO best: **Logistic Regression 93.65%** (mean subject acc 0.936 ± 0.075)
+- Random hold-out can still show ~99% — treat it as a teaching baseline only
+
+Metrics: accuracy, weighted/macro F1, and **sitting_standing_error** (fraction of true sit/stand windows confused with the other posture).
+
+---
+
+## 5. Packaging & tooling
+
+| Piece | Role |
 |---|---|
-| Custom KNN / sklearn KNN | Pedagogical baseline; ~96% |
-| Distance-weighted KNN | Softens hard majority votes |
-| Logistic Regression | Strong linear baseline after scaling |
-| Linear SVM | Margin-based linear separator |
-| RBF SVM | Non-linear kernel; excellent on this feature space |
-| PCA(100) + RBF SVM | Compresses correlated IMU features first |
-| Random Forest / Extra Trees | Feature-importance insight + robust accuracy |
-| Hist Gradient Boosting | Best accuracy in this repo (~99.3%) |
-
-All linear / kernel models are wrapped in a `StandardScaler` pipeline. Tree ensembles operate on the raw (already roughly normalized) UCI features.
-
-### 3.3 Why gravity features dominate
-
-Extra Trees importance consistently ranks:
-
-- `tGravityAcc-energy/mean/min/max` on X/Y  
-- `angle(X,gravityMean)`, `angle(Y,gravityMean)`  
-
-That is physically expected:
-
-- **Laying vs upright** is almost entirely an orientation / gravity story.  
-- **Walking vs stairs** depends more on body-motion energy and frequency content.  
-- **Sitting vs standing** share nearly the same gravity posture at the waist — hence the residual confusion.
+| `src/har/` | Installable library (`pip install -e .`) |
+| `scripts/export_model.py` | Train + `joblib` export |
+| `scripts/predict.py` | CLI inference on a feature matrix |
+| `app/streamlit_app.py` | Interactive demo |
+| `tests/` | pytest (KNN parity, data, eval) |
+| `.github/workflows/ci.yml` | smoke + pytest + quick official benchmark |
+| `pyproject.toml` | package metadata |
 
 ---
 
-## 4. Evaluation protocol
-
-Default protocol in the notebook and `scripts/run_benchmark.py`:
-
-```text
-train_test_split(X, y, test_size=0.30, random_state=24, stratify=y)
-```
-
-Metrics reported:
-
-- Accuracy  
-- Weighted F1  
-- Macro F1  
-- Full classification report + confusion matrix for the best model  
-
-### Important limitation
-
-Windows from the same volunteer are correlated. A random window split **overestimates** subject-independent performance. A stricter next step is leave-one-subject-out (needs the UCI `subject_train.txt` file). This repository currently ships only features and labels, so subject-aware CV is left as a documented extension.
-
----
-
-## 5. Project layout & API
-
-```text
-src/har/
-  data.py     load_har_dataset(), ACTIVITY_LABELS
-  knn.py      CustomKNN, majority_vote, euclidean_distances
-  models.py   build_model_zoo(), evaluate_models(), top_features()
-  plots.py    correlation / counts / leaderboard / confusion helpers
-scripts/run_benchmark.py
-```
-
-Minimal usage:
+## 6. API sketch
 
 ```python
-from har.data import load_har_dataset
-from har.knn import CustomKNN
-from har.models import build_model_zoo, evaluate_models
+from har.data import load_official_splits
+from har.evaluate import evaluate_on_official_test, loso_on_train_partition
+from har.models import CascadedHARClassifier, build_model_zoo
 
-X, y = load_har_dataset()
-model = CustomKNN(n_neighbors=5).fit(X, y)
+train, test = load_official_splits()
+model = CascadedHARClassifier().fit(train.X, train.y)
+pred = model.predict(test.X)
+
+results = evaluate_on_official_test(build_model_zoo(include_custom_knn=False))
 ```
 
 ---
 
-## 6. Reproducing the leaderboard
+## 7. Limitations
 
-```bash
-pip install -r requirements.txt
-python scripts/run_benchmark.py
-```
-
-Expected top line (approximate; floating-point / library versions can shift a digit):
-
-```text
-Hist Gradient Boosting    accuracy ≈ 0.9937
-```
+1. **Waist-only sensing** — placement shift changes the feature distribution.  
+2. **Handcrafted features** — no raw-signal deep models in this repo yet.  
+3. **Subject leakage** if you only use random window splits.  
+4. **Sit/stand ambiguity** remains the dominant error mode even with a specialist.
 
 ---
 
-## 7. Fixes relative to the original notebook
+## 8. Roadmap status
 
-The first version of this project was a strong teaching notebook with a few sharp edges. This refresh addresses them:
-
-| Issue | Fix |
+| Idea | Status |
 |---|---|
-| `har_train` referenced but never defined | Correlation plot now uses `X` / `plot_feature_correlation` |
-| Deprecated `pandas.read_table(..., squeeze=True, sep='\\n')` | `read_csv` with explicit separators |
-| Deprecated `np.bool` | Boolean NumPy dtype via `dtype=bool` |
-| Slow row-wise homemade KNN | Vectorized `CustomKNN` |
-| Only KNN evaluated | Full model zoo + CLI leaderboard |
-| Empty README | Project narrative, results table, quick start |
-| Duplicate UCI feature names | Deterministic uniquification |
-
----
-
-## 8. Roadmap
-
-Ideas worth pursuing next:
-
-1. **Subject-independent evaluation** — download `subject_train.txt` / official test split; report leave-one-subject-out scores.  
-2. **Raw-signal deep learning** — 1D CNN / LSTM / Transformer on the inertial time series instead of handcrafted features.  
-3. **Calibration & latency** — measure prediction time for on-device constraints; distill the boosting model.  
-4. **Binary posture detector** — specialize a model for sitting vs standing, the only pair that still confuses the ensemble.  
-5. **Streaming demo** — read phone IMU over BLE / Web Sensor API and classify live windows.
+| Official UCI test evaluation | Done |
+| Subject IDs + LOSO | Done |
+| Sit/stand specialist + cascade | Done |
+| Calibrated probabilities | Done |
+| Model export + predict CLI | Done |
+| Streamlit demo | Done |
+| pytest + GitHub Actions CI | Done |
+| README results card + limitations | Done |
+| Raw-signal deep learning | Future |
+| On-device / streaming demo | Future |
 
 ---
 

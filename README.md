@@ -1,99 +1,135 @@
 # Human Activity Recognition from Smartphone Sensors
 
-> Turn waist-mounted accelerometer & gyroscope readings into a real-time guess of what someone is doing — walking, climbing stairs, sitting, standing, or lying down — at **~99% accuracy**.
+> Turn waist-mounted accelerometer & gyroscope readings into a real-time guess of what someone is doing — walking, climbing stairs, sitting, standing, or lying down.
 
+[![CI](https://github.com/juandapradam12/HumanActivityRecognition/actions/workflows/ci.yml/badge.svg)](https://github.com/juandapradam12/HumanActivityRecognition/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
 [![scikit-learn](https://img.shields.io/badge/scikit--learn-1.3%2B-orange)](https://scikit-learn.org/)
 [![Dataset](https://img.shields.io/badge/Dataset-UCI%20HAR-green)](https://archive.ics.uci.edu/ml/datasets/human+activity+recognition+using+smartphones)
 
-This project classifies human activity from the classic [UCI HAR Using Smartphones](https://archive.ics.uci.edu/ml/datasets/human+activity+recognition+using+smartphones) dataset: **7,352 labeled windows**, each described by **561 engineered IMU features**.
+Classify human activity from the classic [UCI HAR Using Smartphones](https://archive.ics.uci.edu/ml/datasets/human+activity+recognition+using+smartphones) dataset: **7,352 train + 2,947 test windows**, each a **561-D IMU feature vector**.
 
-It is both a **teaching notebook** (k-NN implemented from scratch) and a **serious classical-ML benchmark** that pushes accuracy from a ~96% neighbor baseline to **~99.3%** with histogram gradient boosting.
+This repo is both a **teaching notebook** (k-NN from scratch) and a **rigorous classical-ML benchmark** with official test evaluation, leave-one-subject-out (LOSO) scores, a sitting/standing specialist, model export, CI, and a Streamlit demo.
 
----
-
-## Why this matters
-
-Smartphones already carry the sensors needed for:
-
-- Fitness & rehab coaching
-- Fall / sedentary detection for health apps
-- Context-aware UX (silence notifications while walking upstairs, etc.)
-- Privacy-friendly on-device sensing — no camera required
-
-HAR is a clean playground for comparing distance-based, linear, kernel, and ensemble methods on a high-dimensional but well-structured feature space.
+<p align="center">
+  <img src="docs/assets/official_leaderboard.png" alt="Official UCI test leaderboard" width="720" />
+</p>
 
 ---
 
-## Results at a glance
+## Results card
 
-Hold-out evaluation: stratified 70/30 split of the training windows (`random_state=24`).
+### Official UCI test (train → held-out volunteers)
 
-| Model | Accuracy | Weighted F1 |
-|---|---:|---:|
-| Hist Gradient Boosting | **0.9937** | **0.9937** |
-| RBF SVM | 0.9882 | 0.9882 |
-| Extra Trees | 0.9878 | 0.9878 |
-| Logistic Regression | 0.9841 | 0.9841 |
-| Linear SVM | 0.9819 | 0.9819 |
-| Random Forest | 0.9814 | 0.9814 |
-| PCA(100) + RBF SVM | 0.9764 | 0.9764 |
-| KNN (k=5) | ~0.958 | ~0.958 |
-| **Custom KNN (from scratch)** | matches sklearn | — |
+| Model | Accuracy | Weighted F1 | Sit↔Stand error |
+|---|---:|---:|---:|
+| **Logistic Regression** | **0.9555** | **0.9555** | 0.0704 |
+| RBF SVM | 0.9549 | 0.9547 | 0.0635 |
+| Cascaded HGB + Sit/Stand | 0.9518 | 0.9517 | **0.0567** |
+| Extra Trees | 0.9413 | 0.9409 | 0.0616 |
+| Hist Gradient Boosting | 0.9359 | 0.9356 | 0.1026 |
+| sklearn KNN (k=5) | 0.8802 | 0.8790 | 0.1457 |
 
-Almost every remaining mistake is **sitting ↔ standing** — exactly the pair that looks alike on a waist IMU when the body is still.
+Sitting/standing binary specialist (official test): **94.2%** accuracy.
 
----
+### Leave-one-subject-out (21 training volunteers)
 
-## What’s inside
+| Model | Overall acc. | Mean±std (subject) | Sit↔Stand error |
+|---|---:|---:|---:|
+| **Logistic Regression** | **0.9365** | 0.9355 ± 0.0748 | 0.0831 |
+| Extra Trees | 0.9257 | 0.9258 ± 0.0654 | 0.1000 |
+| Hist Gradient Boosting | 0.9214 | 0.9229 ± 0.0802 | 0.1109 |
 
-```
-├── Human Activity Recognition.ipynb   # End-to-end story: EDA → homemade KNN → model zoo
-├── src/har/                           # Reusable library
-│   ├── data.py                        # Dataset loading & activity labels
-│   ├── knn.py                         # Vectorized from-scratch k-NN
-│   ├── models.py                      # Model zoo & evaluation
-│   └── plots.py                       # EDA / comparison charts
-├── scripts/run_benchmark.py           # One-command leaderboard
-├── docs/DOCUMENTATION.md              # Methodology, algorithms, design notes
-├── features.txt                       # 561 feature names
-├── activity_labels.txt                # 1..6 → activity names
-├── X_train.txt / y_train.txt          # UCI HAR training partition
-└── requirements.txt
-```
+<p align="center">
+  <img src="docs/assets/official_confusion.png" alt="Official test confusion matrix" width="480" />
+  <img src="docs/assets/loso_leaderboard.png" alt="LOSO leaderboard" width="480" />
+</p>
+
+### Why random hold-out looked like 99%
+
+A shuffled 70/30 split of *training windows* can hit ~99% because windows from the same person leak across folds. **Official test (~95.5%)** and **LOSO (~93.7%)** are the credible numbers for this project.
 
 ---
 
 ## Quick start
 
 ```bash
-# 1. Environment
 python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate
 pip install -r requirements.txt
+pip install -e .
 
-# 2. Rank every model (skip homemade KNN for a faster smoke run)
-python scripts/run_benchmark.py
-python scripts/run_benchmark.py --skip-custom-knn
+# Ensure official test + subject files are present
+python scripts/download_data.py
 
-# 3. Explore interactively
+# Smoke + unit tests
+python scripts/smoke_test.py
+pytest -q
+
+# Official UCI test leaderboard
+python scripts/run_benchmark.py --protocol official --skip-custom-knn
+
+# Leave-one-subject-out
+python scripts/run_benchmark.py --protocol loso --skip-custom-knn
+
+# Export a model and predict
+python scripts/export_model.py
+python scripts/predict.py --input X_test.txt
+
+# Interactive demo
+streamlit run app/streamlit_app.py
+
+# Teaching notebook
 jupyter notebook "Human Activity Recognition.ipynb"
 ```
 
-Use the library directly:
+---
 
-```python
-from har.data import load_har_dataset
-from har.models import build_model_zoo, evaluate_models
-from sklearn.model_selection import train_test_split
+## What’s inside
 
-X, y = load_har_dataset()
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.3, random_state=24, stratify=y
-)
-results = evaluate_models(build_model_zoo(), X_train, y_train, X_test, y_test)
-print(results.head())
 ```
+├── Human Activity Recognition.ipynb   # EDA → homemade KNN → model zoo
+├── app/streamlit_app.py               # Interactive demo
+├── src/har/                           # Library
+│   ├── data.py                        # Official splits + subjects
+│   ├── knn.py                         # Vectorized from-scratch k-NN
+│   ├── models.py                      # Zoo, cascade, sit/stand specialist
+│   ├── evaluate.py                    # Official test + LOSO protocols
+│   ├── export.py                      # joblib save/load
+│   └── plots.py
+├── scripts/
+│   ├── download_data.py               # Fetch UCI train/test/subjects
+│   ├── run_benchmark.py               # holdout | official | loso
+│   ├── export_model.py / predict.py
+│   └── smoke_test.py
+├── tests/                             # pytest suite
+├── docs/DOCUMENTATION.md
+├── docs/assets/                       # Result figures
+├── X_*.txt y_*.txt subject_*.txt      # UCI partitions
+└── .github/workflows/ci.yml
+```
+
+---
+
+## Highlights
+
+- **From-scratch KNN** matching scikit-learn Euclidean predictions
+- **Official test + LOSO** — not just optimistic random hold-outs
+- **Sitting/standing specialist** + cascaded classifier to cut the hard-pair error
+- **Calibrated probabilities** for thresholded / demo use
+- **Export + CLI predict** (`joblib`) and **Streamlit** playground
+- **CI** (smoke test, pytest, quick official benchmark)
+
+---
+
+## Limitations
+
+- Sensors are **waist-mounted only** — hand / pocket placements differ.
+- Features are **hand-engineered UCI vectors**, not raw waveforms (no deep seq models here yet).
+- Random window splits **overestimate** generalization; prefer official / LOSO numbers above.
+- Residual errors concentrate on **sitting ↔ standing**.
+
+See [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) for methodology and design notes.
 
 ---
 
@@ -108,29 +144,11 @@ print(results.head())
 | 5 | STANDING |
 | 6 | LAYING |
 
-Signals come from a Samsung Galaxy S II worn on the waist (50 Hz accelerometer + gyroscope), filtered and windowed into 2.56 s segments with 50% overlap. See [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) for the full pipeline.
-
----
-
-## Highlights
-
-- **From-scratch KNN that matches scikit-learn** — Euclidean distances, majority vote, nearest-neighbor tie-break, vectorized with NumPy.
-- **Model zoo beyond neighbors** — logistic regression, linear/RBF SVM, PCA compression, Random Forest, Extra Trees, Hist Gradient Boosting.
-- **Feature intelligence** — gravity channels and device–gravity angles dominate importance, which matches the physics of posture.
-- **Clean package layout** — notebook for narrative, `src/har` for reuse, CLI for repeatable benchmarks.
-
----
-
-## Documentation
-
-- [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) — dataset, algorithms, evaluation protocol, improvement roadmap
-- Notebook walkthrough — open `Human Activity Recognition.ipynb`
-
 ---
 
 ## License & data credit
 
-Code in this repository is provided for educational and research use. The sensor data belongs to the original UCI HAR authors (Reyes-Ortiz, Anguita, Ghio, Oneto, Parra). Please cite their work if you publish results based on this dataset:
+Code is provided for educational and research use. Sensor data © UCI HAR authors (Reyes-Ortiz, Anguita, Ghio, Oneto, Parra):
 
 > Davide Anguita, Alessandro Ghio, Luca Oneto, Xavier Parra and Jorge L. Reyes-Ortiz.  
 > *A Public Domain Dataset for Human Activity Recognition Using Smartphones.* ESANN 2013.
