@@ -1,181 +1,261 @@
 # Human Activity Recognition from Smartphone Sensors
 
-> Turn waist-mounted accelerometer & gyroscope readings into a real-time guess of what someone is doing — walking, climbing stairs, sitting, standing, or lying down.
-
-[![CI](https://github.com/juandapradam12/HumanActivityRecognition/actions/workflows/ci.yml/badge.svg)](https://github.com/juandapradam12/HumanActivityRecognition/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/Python-3.10%2B-blue)](https://www.python.org/)
-[![scikit-learn](https://img.shields.io/badge/scikit--learn-1.3%2B-orange)](https://scikit-learn.org/)
-[![Dataset](https://img.shields.io/badge/Dataset-UCI%20HAR-green)](https://archive.ics.uci.edu/ml/datasets/human+activity+recognition+using+smartphones)
-
-Classify human activity from the classic [UCI HAR Using Smartphones](https://archive.ics.uci.edu/ml/datasets/human+activity+recognition+using+smartphones) dataset: **7,352 train + 2,947 test windows**.
-
-This repo combines a **teaching notebook** (k-NN from scratch), a **rigorous classical-ML benchmark** (official test + LOSO), and a **raw-IMU 1D CNN** so you can compare handcrafted features vs learned representations side by side.
+<p align="center">
+  <b>Classify what someone is doing from a waist-mounted phone IMU — walking, stairs, sitting, standing, or laying — at ~95% on held-out people.</b>
+</p>
 
 <p align="center">
-  <img src="docs/assets/official_leaderboard.png" alt="Official UCI test leaderboard" width="720" />
+  <a href="https://github.com/juandapradam12/HumanActivityRecognition/actions/workflows/ci.yml"><img src="https://github.com/juandapradam12/HumanActivityRecognition/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <img src="https://img.shields.io/badge/Python-3.10%2B-blue" alt="Python" />
+  <img src="https://img.shields.io/badge/scikit--learn-1.3%2B-orange" alt="sklearn" />
+  <img src="https://img.shields.io/badge/PyTorch-CNN%20baseline-red" alt="PyTorch" />
+  <a href="https://archive.ics.uci.edu/ml/datasets/human+activity+recognition+using+smartphones"><img src="https://img.shields.io/badge/Dataset-UCI%20HAR-green" alt="UCI HAR" /></a>
+</p>
+
+Build a production-minded HAR pipeline on the classic [UCI Human Activity Recognition Using Smartphones](https://archive.ics.uci.edu/ml/datasets/human+activity+recognition+using+smartphones) dataset:
+
+| What you get | Detail |
+|---|---|
+| **Teaching core** | k-Nearest Neighbors implemented from scratch (matches scikit-learn) |
+| **Classical ML zoo** | Logistic regression, SVMs, forests, gradient boosting, sit/stand specialist |
+| **Deep baseline** | 1D CNN on raw 9×128 IMU windows — competitive with engineered features |
+| **Honest metrics** | Official UCI test + leave-one-subject-out (not just leaked random splits) |
+| **Ship path** | Export (`joblib`), CLI predict, Streamlit demo, pytest + GitHub Actions CI |
+
+<p align="center">
+  <img src="docs/assets/features_vs_cnn.png" alt="Handcrafted features vs raw-IMU CNN" width="820" />
 </p>
 
 ---
 
-## Results card
+## Headline results
 
-### Official UCI test (train → held-out volunteers)
+Evaluated on **held-out volunteers** (official UCI test) and **leave-one-subject-out** on the 21 training subjects.
 
-| Model | Accuracy | Weighted F1 | Sit↔Stand error |
-|---|---:|---:|---:|
-| **Logistic Regression** | **0.9555** | **0.9555** | 0.0704 |
-| RBF SVM | 0.9549 | 0.9547 | 0.0635 |
-| Cascaded HGB + Sit/Stand | 0.9518 | 0.9517 | **0.0567** |
-| Extra Trees | 0.9413 | 0.9409 | 0.0616 |
-| Hist Gradient Boosting | 0.9359 | 0.9356 | 0.1026 |
-| sklearn KNN (k=5) | 0.8802 | 0.8790 | 0.1457 |
-
-Sitting/standing binary specialist (official test): **94.2%** accuracy.
-
-### Leave-one-subject-out (21 training volunteers)
-
-| Model | Overall acc. | Mean±std (subject) | Sit↔Stand error |
-|---|---:|---:|---:|
-| **Logistic Regression** | **0.9365** | 0.9355 ± 0.0748 | 0.0831 |
-| Extra Trees | 0.9257 | 0.9258 ± 0.0654 | 0.1000 |
-| Hist Gradient Boosting | 0.9214 | 0.9229 ± 0.0802 | 0.1109 |
-
-### Features vs raw-IMU 1D CNN
-
-Same protocols, different inputs: **561 engineered features** vs **9 × 128 raw accelerometer/gyro windows**.
-
-| Model | Input | Official test | LOSO |
+| Approach | Input | Official test | LOSO |
 |---|---|---:|---:|
-| Logistic Regression | handcrafted 561 | **0.9555** | **0.9365** |
-| Cascaded HGB + Sit/Stand | handcrafted 561 | 0.9518 | — |
-| **1D CNN** | **raw IMU 9×128** | **0.9464** | **0.9278** |
-| Extra Trees | handcrafted 561 | 0.9413 | 0.9253 |
-| Hist Gradient Boosting | handcrafted 561 | 0.9359 | 0.9293 |
+| **Logistic Regression** | 561 handcrafted features | **95.55%** | **93.65%** |
+| Cascaded HGB + Sit/Stand | 561 features | 95.18% | — |
+| **1D CNN** | raw IMU (9 × 128) | **94.64%** | **92.78%** |
+| Extra Trees | 561 features | 94.13% | 92.53% |
+| Hist Gradient Boosting | 561 features | 93.59% | 92.93% |
+| KNN (k=5) | 561 features | 88.02% | — |
 
-The CNN is competitive **without** the UCI feature pipeline — locomotion classes are near-perfect; residual errors still concentrate on sitting ↔ standing.
+> A naive shuffled hold-out of training windows can still show ~99%. That number is **optimistic** (same-person windows leak across folds). Prefer the official / LOSO figures above.
+
+Almost every remaining mistake is **sitting ↔ standing** — the pair that looks alike on a waist IMU when the body is still. A dedicated specialist cuts that error to **~5.7%** on the official test set.
 
 <p align="center">
-  <img src="docs/assets/features_vs_cnn.png" alt="Features vs CNN comparison" width="780" />
+  <img src="docs/assets/official_leaderboard.png" alt="Official test leaderboard" width="700" />
 </p>
+
+---
+
+## Why this project
+
+Smartphones already carry the sensors for:
+
+- Fitness & rehab coaching  
+- Sedentary / posture awareness  
+- Context-aware UX (adapt notifications to motion)  
+- Privacy-friendly sensing — **no camera required**
+
+This repository is a clean end-to-end case study: explore the data, implement a classic algorithm by hand, benchmark modern classical models, add a deep baseline on raw signals, and evaluate the way papers actually should — **by subject**, not by randomly shuffled windows.
+
+---
+
+## Six activities
+
+| ID | Label | Intuition |
+|---:|---|---|
+| 1 | WALKING | Dynamic, periodic body motion |
+| 2 | WALKING_UPSTAIRS | Higher vertical effort / frequency cues |
+| 3 | WALKING_DOWNSTAIRS | Distinct impact pattern |
+| 4 | SITTING | Static — hard to separate from standing |
+| 5 | STANDING | Static — shares gravity pose with sitting |
+| 6 | LAYING | Orientation / gravity flip |
+
+Dataset: 30 volunteers, Samsung Galaxy S II on the waist, 50 Hz accelerometer + gyroscope, 2.56 s windows (50% overlap) → **7,352 train** and **2,947 test** labeled windows.
 
 <p align="center">
-  <img src="docs/assets/official_confusion.png" alt="Official test confusion matrix" width="480" />
-  <img src="docs/assets/loso_leaderboard.png" alt="LOSO leaderboard" width="480" />
+  <img src="docs/assets/activity_counts.png" alt="Class balance" width="640" />
 </p>
-
-### Why random hold-out looked like 99%
-
-A shuffled 70/30 split of *training windows* can hit ~99% because windows from the same person leak across folds. **Official test (~95.5%)** and **LOSO (~93.7%)** are the credible numbers for this project.
 
 ---
 
 ## Quick start
 
+### 1. Setup
+
 ```bash
+git clone https://github.com/juandapradam12/HumanActivityRecognition.git
+cd HumanActivityRecognition
+
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 pip install -e .
 
-# Ensure official test + subject files are present
+# Tabular UCI files (test split + subject IDs)
 python scripts/download_data.py
-# Optional: raw IMU windows for the CNN baseline (~182MB)
+
+# Optional (~182MB): raw IMU tensors for the CNN
 python scripts/download_data.py --with-raw
+```
 
-# Smoke + unit tests
+### 2. Verify
+
+```bash
 python scripts/smoke_test.py
-pytest -q
+pytest -q -m "not slow"
+```
 
-# Official UCI test leaderboard
+### 3. Reproduce results
+
+```bash
+# Classical models — official UCI test
 python scripts/run_benchmark.py --protocol official --skip-custom-knn
 
-# Leave-one-subject-out
+# Subject-independent CV
 python scripts/run_benchmark.py --protocol loso --skip-custom-knn
 
 # Features vs 1D CNN (official + LOSO)
 python scripts/run_deep_baseline.py
+```
 
-# Export a model and predict
+### 4. Demo & export
+
+```bash
 python scripts/export_model.py
 python scripts/predict.py --input X_test.txt
-
-# Interactive demo
 streamlit run app/streamlit_app.py
-
-# Teaching notebook
 jupyter notebook "Human Activity Recognition.ipynb"
 ```
 
 ---
 
-## What’s inside
+## Repository layout
 
-```
-├── Human Activity Recognition.ipynb   # EDA → homemade KNN → model zoo
-├── app/streamlit_app.py               # Interactive demo
-├── src/har/                           # Library
-│   ├── data.py                        # Official splits + subjects
-│   ├── raw_data.py                    # Raw 9×128 IMU windows
-│   ├── knn.py                         # Vectorized from-scratch k-NN
-│   ├── models.py                      # Zoo, cascade, sit/stand specialist
-│   ├── cnn.py                         # PyTorch 1D CNN baseline
-│   ├── evaluate.py                    # Official test + LOSO protocols
-│   ├── export.py                      # joblib save/load
-│   └── plots.py
+```text
+HumanActivityRecognition/
+├── README.md                          ← you are here
+├── Human Activity Recognition.ipynb   ← narrative: EDA → homemade KNN → models
+├── app/streamlit_app.py               ← interactive demo
+├── src/har/                           ← installable library
+│   ├── data.py                        # official splits + labels
+│   ├── raw_data.py                    # raw 9×128 IMU windows
+│   ├── knn.py                         # from-scratch vectorized k-NN
+│   ├── models.py                      # zoo, cascade, sit/stand specialist
+│   ├── cnn.py                         # PyTorch 1D CNN
+│   ├── evaluate.py                    # official test + LOSO
+│   ├── export.py                      # joblib persistence
+│   └── plots.py                       # charts
 ├── scripts/
-│   ├── download_data.py               # Fetch UCI files (+ --with-raw)
+│   ├── download_data.py               # UCI fetch (+ --with-raw)
 │   ├── run_benchmark.py               # holdout | official | loso
-│   ├── run_deep_baseline.py           # Features vs CNN comparison
+│   ├── run_deep_baseline.py           # features vs CNN
 │   ├── export_model.py / predict.py
 │   └── smoke_test.py
-├── tests/                             # pytest suite
-├── docs/DOCUMENTATION.md
-├── docs/assets/                       # Result figures
-├── X_*.txt y_*.txt subject_*.txt      # UCI partitions
+├── tests/                             ← pytest
+├── docs/
+│   ├── DOCUMENTATION.md               # full methodology
+│   ├── MODEL_CARD.md                  # model card
+│   ├── WALKTHROUGH.md                 # guided tour
+│   └── assets/                        # result figures
+├── X_*.txt  y_*.txt  subject_*.txt    # UCI partitions
 └── .github/workflows/ci.yml
 ```
 
 ---
 
-## Highlights
+## Documentation
 
-- **From-scratch KNN** matching scikit-learn Euclidean predictions
-- **Official test + LOSO** — not just optimistic random hold-outs
-- **Raw-IMU 1D CNN** competitive with 561-D engineered features
-- **Sitting/standing specialist** + cascaded classifier to cut the hard-pair error
-- **Calibrated probabilities** for thresholded / demo use
-- **Export + CLI predict** (`joblib`) and **Streamlit** playground
-- **CI** (smoke test, pytest, quick official benchmark)
-
----
-
-## Limitations
-
-- Sensors are **waist-mounted only** — hand / pocket placements differ.
-- The CNN uses **fixed 2.56 s windows** already segmented by UCI (not a full streaming detector).
-- Random window splits **overestimate** generalization; prefer official / LOSO numbers above.
-- Residual errors concentrate on **sitting ↔ standing** (worse for the CNN than for feature models).
-
-See [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) for methodology and design notes.
+| Doc | Contents |
+|---|---|
+| [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) | Dataset, algorithms, evaluation, API, reproducibility |
+| [`docs/MODEL_CARD.md`](docs/MODEL_CARD.md) | Intended use, metrics, data, limitations, ethics |
+| [`docs/WALKTHROUGH.md`](docs/WALKTHROUGH.md) | Step-by-step tour of the codebase and experiments |
+| Notebook | Interactive EDA + homemade KNN story |
 
 ---
 
-## Activities
+## Method snapshot
 
-| ID | Activity |
-|---:|---|
-| 1 | WALKING |
-| 2 | WALKING_UPSTAIRS |
-| 3 | WALKING_DOWNSTAIRS |
-| 4 | SITTING |
-| 5 | STANDING |
-| 6 | LAYING |
+```text
+Smartphone IMU @ 50 Hz
+        │
+        ├─► UCI 561-D features  ──► Classical zoo / cascade  ──► ~95.6% official
+        │
+        └─► Raw 9 × 128 window  ──► 1D CNN (PyTorch)         ──► ~94.6% official
+```
+
+**Evaluation discipline**
+
+1. `official` — train on 21 people, test on 9 held-out people  
+2. `loso` — rotate each training volunteer out as the test subject  
+3. `holdout` — random window split (teaching only; overestimates)
+
+**Hard pair:** sitting vs standing → calibrated RBF-SVM specialist + optional cascade.
 
 ---
 
-## License & data credit
+## Library usage
 
-Code is provided for educational and research use. Sensor data © UCI HAR authors (Reyes-Ortiz, Anguita, Ghio, Oneto, Parra):
+```python
+from har.data import load_official_splits
+from har.models import CascadedHARClassifier, build_model_zoo
+from har.evaluate import evaluate_on_official_test
 
-> Davide Anguita, Alessandro Ghio, Luca Oneto, Xavier Parra and Jorge L. Reyes-Ortiz.  
-> *A Public Domain Dataset for Human Activity Recognition Using Smartphones.* ESANN 2013.
+train, test = load_official_splits()
+
+model = CascadedHARClassifier().fit(train.X, train.y)
+print(model.predict(test.X[:5]))
+
+leaderboard = evaluate_on_official_test(
+    build_model_zoo(include_custom_knn=False)
+)
+print(leaderboard[["model", "accuracy", "sitting_standing_error"]])
+```
+
+Raw-signal CNN:
+
+```python
+from har.cnn import train_eval_official
+
+result, metrics, preds = train_eval_official(epochs=25)
+print(metrics)
+```
+
+---
+
+## Limitations (read these)
+
+- **Waist placement only** — pocket / hand / bag will shift the distribution.  
+- **Segmented windows** — UCI already cuts 2.56 s slices; this is not a full always-on detector.  
+- **Sit ↔ stand confusion** remains the main error mode, especially for the CNN.  
+- **Subject leakage** if you only quote random hold-out accuracy.
+
+---
+
+## Citation
+
+If you use the dataset, please cite the original authors:
+
+```bibtex
+@inproceedings{anguita2013public,
+  title={A Public Domain Dataset for Human Activity Recognition Using Smartphones},
+  author={Anguita, Davide and Ghio, Alessandro and Oneto, Luca and
+          Parra, Xavier and Reyes-Ortiz, Jorge L.},
+  booktitle={ESANN},
+  year={2013}
+}
+```
+
+Code in this repository is provided for **educational and research** use.
+
+---
+
+## License & credit
+
+Sensor data © UCI HAR authors (Reyes-Ortiz, Anguita, Ghio, Oneto, Parra).  
+Project code and documentation by Juan David Prada Malagón.
