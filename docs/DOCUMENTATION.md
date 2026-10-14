@@ -69,6 +69,23 @@ On the official test set the cascade reaches the **lowest sit↔stand error (5.7
 
 Extra Trees consistently ranks gravity / orientation channels highest (`tGravityAcc-*`, `angle(*,gravityMean)`), matching the physics of posture.
 
+### 3.5 Raw-IMU 1D CNN
+
+`src/har/cnn.py` trains a compact PyTorch CNN on the UCI **Inertial Signals** tensors:
+
+- Input shape: `(batch, 9, 128)` — body acc, body gyro, total acc × {x,y,z}
+- 3× Conv1d + BatchNorm + pooling → AdaptiveAvgPool → Linear(6)
+- Trained with AdamW; best validation checkpoint restored
+
+Download raw windows (not committed — ~182MB):
+
+```bash
+python scripts/download_data.py --with-raw
+python scripts/run_deep_baseline.py
+```
+
+**Takeaway:** the CNN reaches ~94.6% official / ~92.8% LOSO — close to logistic regression on engineered features — while learning directly from waveforms. It still struggles more on sitting ↔ standing, where gravity-orientation features help classical models.
+
 ---
 
 ## 4. Evaluation protocols
@@ -98,10 +115,11 @@ Metrics: accuracy, weighted/macro F1, and **sitting_standing_error** (fraction o
 | `src/har/` | Installable library (`pip install -e .`) |
 | `scripts/export_model.py` | Train + `joblib` export |
 | `scripts/predict.py` | CLI inference on a feature matrix |
+| `scripts/run_deep_baseline.py` | Features vs 1D CNN comparison |
 | `app/streamlit_app.py` | Interactive demo |
-| `tests/` | pytest (KNN parity, data, eval) |
+| `tests/` | pytest (KNN parity, data, eval, CNN) |
 | `.github/workflows/ci.yml` | smoke + pytest + quick official benchmark |
-| `pyproject.toml` | package metadata |
+| `pyproject.toml` | package metadata (`[deep]` extra for PyTorch) |
 
 ---
 
@@ -142,7 +160,8 @@ results = evaluate_on_official_test(build_model_zoo(include_custom_knn=False))
 | Streamlit demo | Done |
 | pytest + GitHub Actions CI | Done |
 | README results card + limitations | Done |
-| Raw-signal deep learning | Future |
+| Raw-signal 1D CNN + features comparison | Done |
+| Stronger seq models (Transformer / TCN) | Future |
 | On-device / streaming demo | Future |
 
 ---

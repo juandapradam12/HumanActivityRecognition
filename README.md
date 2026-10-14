@@ -7,9 +7,9 @@
 [![scikit-learn](https://img.shields.io/badge/scikit--learn-1.3%2B-orange)](https://scikit-learn.org/)
 [![Dataset](https://img.shields.io/badge/Dataset-UCI%20HAR-green)](https://archive.ics.uci.edu/ml/datasets/human+activity+recognition+using+smartphones)
 
-Classify human activity from the classic [UCI HAR Using Smartphones](https://archive.ics.uci.edu/ml/datasets/human+activity+recognition+using+smartphones) dataset: **7,352 train + 2,947 test windows**, each a **561-D IMU feature vector**.
+Classify human activity from the classic [UCI HAR Using Smartphones](https://archive.ics.uci.edu/ml/datasets/human+activity+recognition+using+smartphones) dataset: **7,352 train + 2,947 test windows**.
 
-This repo is both a **teaching notebook** (k-NN from scratch) and a **rigorous classical-ML benchmark** with official test evaluation, leave-one-subject-out (LOSO) scores, a sitting/standing specialist, model export, CI, and a Streamlit demo.
+This repo combines a **teaching notebook** (k-NN from scratch), a **rigorous classical-ML benchmark** (official test + LOSO), and a **raw-IMU 1D CNN** so you can compare handcrafted features vs learned representations side by side.
 
 <p align="center">
   <img src="docs/assets/official_leaderboard.png" alt="Official UCI test leaderboard" width="720" />
@@ -40,6 +40,24 @@ Sitting/standing binary specialist (official test): **94.2%** accuracy.
 | Extra Trees | 0.9257 | 0.9258 ± 0.0654 | 0.1000 |
 | Hist Gradient Boosting | 0.9214 | 0.9229 ± 0.0802 | 0.1109 |
 
+### Features vs raw-IMU 1D CNN
+
+Same protocols, different inputs: **561 engineered features** vs **9 × 128 raw accelerometer/gyro windows**.
+
+| Model | Input | Official test | LOSO |
+|---|---|---:|---:|
+| Logistic Regression | handcrafted 561 | **0.9555** | **0.9365** |
+| Cascaded HGB + Sit/Stand | handcrafted 561 | 0.9518 | — |
+| **1D CNN** | **raw IMU 9×128** | **0.9464** | **0.9278** |
+| Extra Trees | handcrafted 561 | 0.9413 | 0.9253 |
+| Hist Gradient Boosting | handcrafted 561 | 0.9359 | 0.9293 |
+
+The CNN is competitive **without** the UCI feature pipeline — locomotion classes are near-perfect; residual errors still concentrate on sitting ↔ standing.
+
+<p align="center">
+  <img src="docs/assets/features_vs_cnn.png" alt="Features vs CNN comparison" width="780" />
+</p>
+
 <p align="center">
   <img src="docs/assets/official_confusion.png" alt="Official test confusion matrix" width="480" />
   <img src="docs/assets/loso_leaderboard.png" alt="LOSO leaderboard" width="480" />
@@ -61,6 +79,8 @@ pip install -e .
 
 # Ensure official test + subject files are present
 python scripts/download_data.py
+# Optional: raw IMU windows for the CNN baseline (~182MB)
+python scripts/download_data.py --with-raw
 
 # Smoke + unit tests
 python scripts/smoke_test.py
@@ -71,6 +91,9 @@ python scripts/run_benchmark.py --protocol official --skip-custom-knn
 
 # Leave-one-subject-out
 python scripts/run_benchmark.py --protocol loso --skip-custom-knn
+
+# Features vs 1D CNN (official + LOSO)
+python scripts/run_deep_baseline.py
 
 # Export a model and predict
 python scripts/export_model.py
@@ -92,14 +115,17 @@ jupyter notebook "Human Activity Recognition.ipynb"
 ├── app/streamlit_app.py               # Interactive demo
 ├── src/har/                           # Library
 │   ├── data.py                        # Official splits + subjects
+│   ├── raw_data.py                    # Raw 9×128 IMU windows
 │   ├── knn.py                         # Vectorized from-scratch k-NN
 │   ├── models.py                      # Zoo, cascade, sit/stand specialist
+│   ├── cnn.py                         # PyTorch 1D CNN baseline
 │   ├── evaluate.py                    # Official test + LOSO protocols
 │   ├── export.py                      # joblib save/load
 │   └── plots.py
 ├── scripts/
-│   ├── download_data.py               # Fetch UCI train/test/subjects
+│   ├── download_data.py               # Fetch UCI files (+ --with-raw)
 │   ├── run_benchmark.py               # holdout | official | loso
+│   ├── run_deep_baseline.py           # Features vs CNN comparison
 │   ├── export_model.py / predict.py
 │   └── smoke_test.py
 ├── tests/                             # pytest suite
@@ -115,6 +141,7 @@ jupyter notebook "Human Activity Recognition.ipynb"
 
 - **From-scratch KNN** matching scikit-learn Euclidean predictions
 - **Official test + LOSO** — not just optimistic random hold-outs
+- **Raw-IMU 1D CNN** competitive with 561-D engineered features
 - **Sitting/standing specialist** + cascaded classifier to cut the hard-pair error
 - **Calibrated probabilities** for thresholded / demo use
 - **Export + CLI predict** (`joblib`) and **Streamlit** playground
@@ -125,9 +152,9 @@ jupyter notebook "Human Activity Recognition.ipynb"
 ## Limitations
 
 - Sensors are **waist-mounted only** — hand / pocket placements differ.
-- Features are **hand-engineered UCI vectors**, not raw waveforms (no deep seq models here yet).
+- The CNN uses **fixed 2.56 s windows** already segmented by UCI (not a full streaming detector).
 - Random window splits **overestimate** generalization; prefer official / LOSO numbers above.
-- Residual errors concentrate on **sitting ↔ standing**.
+- Residual errors concentrate on **sitting ↔ standing** (worse for the CNN than for feature models).
 
 See [`docs/DOCUMENTATION.md`](docs/DOCUMENTATION.md) for methodology and design notes.
 

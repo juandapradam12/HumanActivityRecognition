@@ -15,6 +15,9 @@ venv/
 !docs/assets/*.png
 .Rhistory
 artifacts/models/
+artifacts/deep_baseline/
 data/uci_har/
+data/inertial_signals/
 /tmp/
 *.joblib
+*.pt
